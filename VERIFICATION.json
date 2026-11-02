@@ -1,0 +1,22 @@
+{
+  "project": "ClearQuote",
+  "verified_at": "2026-11-01T23:52:36Z",
+  "application_auth": "Supabase app-user email session verified through app UI",
+  "provider": "openai",
+  "profile": "fast",
+  "provider_tokens": 240,
+  "credits_used": 1,
+  "project_cap": 100,
+  "credits_remaining": 99,
+  "input": "I'd like a forty-eight-inch solid white oak desk, a pair of drawers, and delivery.",
+  "extracted": {
+    "dimensions": "48-inch Compact Desk",
+    "material": "White Oak Hardwood (Solid)",
+    "drawers": 2,
+    "includeDelivery": true
+  },
+  "catalog_total_usd": 1130,
+  "evidence": "Actual ClearQuote preview draft plus Admas Cloud recent application-AI audit",
+  "paypal_live_verification": false,
+  "submission_completed": false
+}
