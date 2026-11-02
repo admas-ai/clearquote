@@ -21,7 +21,7 @@
   "submission_completed": false,
   "release": "0.1.0",
   "automated_checks": {
-    "pricing_ai_auth_access_launcher": 15,
+    "pricing_ai_auth_access_launcher": 25,
     "checkout_lifecycle": 18,
     "backend_fake_provider": 16,
     "production_build": "passed",
@@ -34,5 +34,5 @@
     "buyer_approval": false,
     "capture_verified": false
   },
-  "new_tunnel_ai_origin": "not_registered_supported_control_unavailable"
+  "new_tunnel_ai_origin": "Interface remains on the approved Admas origin; private run-token API transport added and unit-tested; live combined verification pending"
 }
