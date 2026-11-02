@@ -20,6 +20,15 @@ export function extractTunnelOrigin(text) {
   }
   return null;
 }
+export function demoLaunchUrl(frontendUrl, apiOrigin, accessToken) {
+  const frontend = new URL(frontendUrl);
+  const api = new URL(apiOrigin);
+  if (frontend.protocol !== 'https:' || !frontend.hostname.endsWith('.admas.dev') || frontend.username || frontend.password || frontend.hash) throw new Error('The reviewed frontend must use an HTTPS Admas URL');
+  if (api.protocol !== 'https:' || api.origin !== apiOrigin || !/^[a-z0-9-]+\.trycloudflare\.com$/.test(api.hostname) || api.hostname === 'api.trycloudflare.com') throw new Error('The API must use the exact temporary HTTPS origin');
+  if (!/^[A-Za-z0-9_-]{40,}$/.test(accessToken)) throw new Error('A private demo access token is required');
+  frontend.hash = new URLSearchParams({clearquote_api:apiOrigin,clearquote_access:accessToken}).toString();
+  return frontend.href;
+}
 let stopping = false;
 function stop(code = 0) {
   if (stopping) return;
@@ -114,7 +123,9 @@ async function main() {
     console.log('ClearQuote launcher — Node.js 24 or later.\nnode launch.mjs: private PayPal entry + temporary HTTPS demo.\nnode launch.mjs --local: loopback demo without AdmasLLM (HTTPS origin required).\nnode launch.mjs --check: check package files without credentials or network.\nNo PayPal credentials are written to disk. Ctrl+C stops the server and tunnel.');return;
   }
   if(Number(process.versions.node.split('.')[0])<24) throw new Error('Install Node.js 24 LTS from https://nodejs.org and run Start-ClearQuote.cmd again.');
-  for(const file of ['dist/index.html','dist/admas-public-config.json','server.mjs','runtime-access.mjs','src/data/initialData.ts']) await fs.access(path.join(root,file));
+  for(const file of ['dist/index.html','dist/admas-public-config.json','server.mjs','runtime-access.mjs','src/data/initialData.ts','review-frontend.json']) await fs.access(path.join(root,file));
+  const frontendUrl=JSON.parse(await fs.readFile(path.join(root,'review-frontend.json'),'utf8')).url;
+  demoLaunchUrl(frontendUrl,'https://package-check.trycloudflare.com','a'.repeat(48));
   if(process.argv.includes('--check')) { console.log('ClearQuote package files and Node.js version verified. No credentials used; no provider calls.');return; }
   console.log('ClearQuote Sandbox demo\nEnter the EXISTING ClearQuote PayPal Sandbox credentials. Input is masked and kept in server memory only.\nDo not use live PayPal credentials.');
   let clientId=await privatePrompt('Sandbox Client ID: ');
@@ -124,7 +135,7 @@ async function main() {
   const local=process.argv.includes('--local');
   const publicOrigin=local?'':await tunnel(port);
   const accessToken=randomBytes(32).toString('base64url');
-  const environment={...helperEnvironment(),PORT:String(port),PAYPAL_CLIENT_ID:clientId,PAYPAL_CLIENT_SECRET:clientSecret,DEMO_ACCESS_TOKEN:accessToken,PUBLIC_ORIGIN:publicOrigin};
+  const environment={...helperEnvironment(),PORT:String(port),PAYPAL_CLIENT_ID:clientId,PAYPAL_CLIENT_SECRET:clientSecret,DEMO_ACCESS_TOKEN:accessToken,PUBLIC_ORIGIN:publicOrigin,DEMO_APP_ORIGIN:local?'':new URL(frontendUrl).origin};
   const server=spawn(process.execPath,['server.mjs'],{cwd:root,env:environment,stdio:['ignore','pipe','pipe'],windowsHide:true});
   children.add(server);
   clientId='';clientSecret='';delete environment.PAYPAL_CLIENT_ID;delete environment.PAYPAL_CLIENT_SECRET;
@@ -144,11 +155,11 @@ async function main() {
   await fs.mkdir(runtime,{recursive:true});
   await fs.writeFile(path.join(runtime,'run-info.json'),JSON.stringify({url:publicOrigin||localUrl,startedAt:new Date().toISOString(),mode:'paypal-sandbox'},null,2));
   console.log('\nApplication ready. PayPal credentials loaded; no payment has been attempted.');
-  console.log(`Demo base URL (safe to share for origin registration): ${publicOrigin||localUrl}`);
-  if(publicOrigin) console.log('Send only this base URL back in the ClearQuote chat so its exact HTTPS origin can be approved for AdmasLLM. Then use AI sign-in in the app.');
+  console.log(`Demo server base URL (safe to share): ${publicOrigin||localUrl}`);
+  if(publicOrigin) console.log('The reviewed Admas frontend opens with private access to this server. Use AI sign-in in the app. Keep the complete private launch link out of public submissions.');
   else console.log('Local mode: PayPal Sandbox is available; AdmasLLM requires the HTTPS demo mode.');
   console.log('Keep this window open. Ctrl+C stops the demo.');
-  openBrowser(`${publicOrigin||localUrl}/__clearquote_access?key=${accessToken}`);
+  openBrowser(publicOrigin ? demoLaunchUrl(frontendUrl,publicOrigin,accessToken) : `${localUrl}/__clearquote_access?key=${accessToken}`);
 }
 if (path.resolve(process.argv[1] || '') === fileURLToPath(import.meta.url)) {
   main().catch(error=>{console.error(error.message);stop(1);});
