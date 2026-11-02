@@ -7,12 +7,12 @@ ClearQuote turns a furniture request into an itemized quote, keeps customer revi
 1. Install **Node.js 24 LTS** from <https://nodejs.org>.
 2. Extract the complete prepared archive. On Windows, double-click **Start-ClearQuote.cmd**. On Linux, run `node launch.mjs` in the extracted folder.
 3. Privately paste the **existing ClearQuote PayPal Sandbox Client ID**, then **Secret key 1**, into the masked terminal prompts. These values go to the child application process, are not written to a file, and are not supplied to Cloudflare.
-4. The launcher downloads the official Cloudflare `cloudflared` 2026.10.7 binary and verifies its pinned published SHA-256 before running it. A temporary HTTPS link opens in your browser. A private HttpOnly cookie protects the demo. Keep the terminal open.
-5. AdmasLLM requires an exact approved HTTPS origin. **New temporary tunnel origins cannot currently be registered from the available Admas project controls.** Use the already approved hosted preview for authenticated AI verification. A newly launched tunnel supports the full Node/PayPal workflow and clearly labels local-helper drafts if its AI origin is not approved. Do not send credentials or the private `/__clearquote_access` link.
+4. The launcher downloads the official Cloudflare `cloudflared` 2026.10.7 binary and verifies its pinned published SHA-256 before running it. A temporary HTTPS server starts. The launcher opens the already approved Admas frontend with a private, run-scoped connection to that server. The access token travels only in the URL fragment, is removed before rendering, and stays in this tab's session storage. Keep the terminal open.
+5. The interface stays on the project's approved Admas origin, so a new tunnel does not require another AI-origin registration. `review-frontend.json` identifies the reviewed frontend. The server permits only that exact frontend origin plus the private run token; app-user AI authentication remains separate. Do not publish the complete private launch link.
 6. In the app, select **AI sign-in**, enter your email, then paste the sign-in link from your email into the masked confirmation field without opening the link. A numeric email code is also supported. The first sign-in creates an app authentication user in the attached Supabase staging project.
 7. Create a quote, review its catalog prices, send it, approve the same version from the customer portal, and complete checkout using a **PayPal Sandbox personal buyer account**. A real PayPal account or bank card must not be used for this demo.
 
-Press Ctrl+C in the terminal to stop both processes. The temporary link expires. Restarting creates a new link; it is not automatically approved for AI. A local-only option, `node launch.mjs --local`, supports Sandbox checkout on loopback; AdmasLLM requires a registered HTTPS origin.
+Press Ctrl+C in the terminal to stop both processes. The temporary link expires. Restarting creates a new private connection and invalidates the previous token. A local-only option, `node launch.mjs --local`, supports Sandbox checkout on loopback; AdmasLLM requires a registered HTTPS origin.
 
 The prepared archive includes compiled frontend assets. `node launch.mjs --check` validates the package without credentials or provider calls. Node dependencies are required only when rebuilding source.
 
@@ -48,7 +48,7 @@ The server atomically persists quotes, catalog, settings, and payment attempts i
 
 PayPal OAuth and Orders v2 calls are server-side and Sandbox-only. Order amounts are bound to the approved quote version. Capture checks validate the order, merchant, currency, exact cents, and child capture before the canonical quote becomes paid. Pending or uncertain capture attempts remain recoverable and block conflicting revisions. Duplicate callbacks and retries reuse the existing attempt. The browser announces a receipt only after refreshing the same canonical paid quote and order.
 
-This is a single-owner hackathon demo. The business/customer view switch demonstrates the workflow; it is not a production multi-tenant authorization system. Use synthetic customer information. The static Admas preview supports the frontend and authenticated AI once verified; payments require the standalone Node server.
+This is a single-owner hackathon demo. The business/customer view switch demonstrates the workflow; it is not a production multi-tenant authorization system. Use synthetic customer information. The Admas frontend provides authenticated AI and connects to the standalone Node server for quote persistence and payments. A plain preview without its private launcher connection shows sample data and disables payments. Each reviewer needs a running server and privately supplied Sandbox credentials, or private access to a maintained demo. Keep test access available through December 15, 2026 for judging.
 
 ## Validation and outstanding live evidence
 
@@ -60,7 +60,7 @@ npm run lint
 npm run test:server
 ```
 
-Run `test:server` only in a disposable copy: it writes synthetic test data and replaces provider calls with fakes. The reviewed release has **15 pricing, AI/auth, access and launcher checks**, **18 checkout lifecycle/recovery checks**, and **16 fake-provider backend regressions**. The production build passes. Lint completes with existing warnings; the checkout tests do not replace a real browser or PayPal transaction.
+Run `test:server` only in a disposable copy: it writes synthetic test data and replaces provider calls with fakes. The reviewed release has **25 pricing, AI/auth, access, private-transport and launcher checks**, **18 checkout lifecycle/recovery checks**, and **16 fake-provider backend regressions**. The production build passes. Lint completes with existing warnings; the checkout tests do not replace a real browser or PayPal transaction. The ten transport checks cover exact-origin CORS, preflight, missing/wrong tokens, local compatibility, fragment handling, and preventing app-user Authorization from reaching the payment server.
 
 A live application check verified an authenticated AdmasLLM request: OpenAI fast, 240 provider tokens, 1 credit charged, and the expected 48-inch oak/two-drawer/delivery draft at $1,130. The owner's HTTPS Node runner has also opened the genuine PayPal Sandbox approval page. That page rendered blank in the observed browser, and no buyer approval/capture has been verified.
 
