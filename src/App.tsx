@@ -27,13 +27,24 @@ export function App() {
   
   const [quotes, setQuotes] = useState<Quote[]>(INITIAL_QUOTES);
   const [prices, setPrices] = useState<PriceItem[]>(INITIAL_PRICES);
-  const [settings, setSettings] = useState<BusinessSettings>(INITIAL_SETTINGS);
+  const [settings, setSettings] = useState<BusinessSettings>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('clearquote_display_profile') || '{}');
+      return {...INITIAL_SETTINGS,
+        businessName: typeof saved.businessName === 'string' && saved.businessName.trim() ? saved.businessName.slice(0,160) : INITIAL_SETTINGS.businessName,
+        ownerName: typeof saved.ownerName === 'string' && saved.ownerName.trim() ? saved.ownerName.slice(0,160) : INITIAL_SETTINGS.ownerName};
+    } catch { return INITIAL_SETTINGS; }
+  });
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPricesOpen, setIsPricesOpen] = useState(false);
   const [activeQuoteId, setActiveQuoteId] = useState<string>(() => INITIAL_QUOTES[0]?.id || '');
   const [inlineError, setInlineError] = useState<string | null>(null);
  
+  useEffect(() => {
+    try { localStorage.setItem('clearquote_display_profile',JSON.stringify({businessName:settings.businessName,ownerName:settings.ownerName})); } catch {}
+  }, [settings.businessName,settings.ownerName]);
+
   // Initialize and hydrate from server API when available, otherwise fall back to localStorage demo
   useEffect(() => {
     let mounted = true;
@@ -237,6 +248,7 @@ export function App() {
         setPrices(updated);
       } catch (e: any) {
         setInlineError(`Failed to update price catalog on server: ${e.message}`);
+        throw e;
       }
     } else {
       setPrices(newPrices);
@@ -244,6 +256,10 @@ export function App() {
   };
  
   const handleResetData = () => {
+    if (backendStatus === 'connected') {
+      setInlineError('Sample reset is available in the preview. Your server records have not changed.');
+      return;
+    }
     if (window.confirm('Reset all quotes and catalog items to initial sample state?')) {
       setQuotes(INITIAL_QUOTES);
       setPrices(INITIAL_PRICES);
@@ -262,7 +278,7 @@ export function App() {
   };
  
   return (
-    <div className="min-h-screen bg-stone-100 flex flex-col font-sans text-stone-900 selection:bg-amber-700 selection:text-white">
+    <div className="cq-app min-h-screen flex flex-col text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
       {/* Top Navbar */}
       <Navbar
         viewMode={viewMode}
@@ -275,7 +291,7 @@ export function App() {
  
       {/* Backend Status Banner if disconnected or checking */}
       {backendStatus === 'disconnected' && (
-        <div className="bg-amber-500 text-amber-950 px-4 py-2 text-xs font-semibold text-center flex items-center justify-center gap-2 shadow-inner">
+        <div className="bg-amber-50 text-amber-800 border-b border-amber-200 px-4 py-2 text-xs text-center flex items-center justify-center gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span>Demo preview: payments unavailable</span>
         </div>
@@ -293,6 +309,7 @@ export function App() {
       <main className="flex-1">
         {viewMode === 'owner' ? (
           <OwnerDashboard
+            businessName={settings.businessName}
             quotes={quotes}
             prices={prices}
             onUpdateQuote={handleUpdateQuote}
@@ -329,21 +346,10 @@ export function App() {
         />
       )}
  
-      {/* Footer */}
-      <footer className="bg-stone-900 text-stone-400 py-6 border-t border-stone-800 text-xs mt-12">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-stone-200">ClearQuote</span>
-            <span>— Natural Language Custom Furniture Quoting & Durable Node API</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span>{backendStatus === 'connected' ? 'Durable Node Backend Active' : 'Demo preview: payments unavailable'}</span>
-            <span className={`px-2.5 py-1 rounded font-mono font-medium ${backendStatus === 'connected' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
-              {backendStatus === 'connected' ? 'API Connected' : 'Demo Mode'}
-            </span>
-          </div>
-        </div>
-      </footer>
+      <footer className="cq-footer"><div>
+        <span><strong>ClearQuote</strong> · Estimates, approvals & payments</span>
+        <span>Sandbox demonstration · No real funds{backendStatus === 'disconnected' ? ' · Payments unavailable in preview' : ''}</span>
+      </div></footer>
     </div>
   );
 }
