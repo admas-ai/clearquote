@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import type { Quote, QuoteVersion, QuoteItem, BusinessSettings, PriceItem } from '../types';
 import { CheckCircle2, ShieldCheck, Sparkles, History, CreditCard, RefreshCw, Check, AlertCircle } from 'lucide-react';
 import { apiFetchPayPalConfig, apiCreatePayPalOrder, apiCapturePayPalOrder } from '../api';
 import { parseNaturalLanguagePrompt, calculateQuoteItems } from '../utils/calculator';
+import { Dialog } from './Dialog';
+import { formatMoney } from '../utils/currency';
  
 interface CustomerPortalProps {
   quotes: Quote[];
@@ -105,13 +107,13 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
   });
   const nextQuoteId = selectedQuote?.id || '';
   const nextVersion = activeVersion?.versionNumber || 0;
-  if (paymentScopeRef.current.quoteId !== nextQuoteId ||
-      paymentScopeRef.current.versionNumber !== nextVersion ||
-      paymentScopeRef.current.connected !== backendConnected) {
-    paymentScopeRef.current = { ...paymentScopeRef.current,
-      generation: paymentScopeRef.current.generation + 1,
-      quoteId: nextQuoteId, versionNumber: nextVersion, connected: backendConnected };
-  }
+  useLayoutEffect(() => {
+    const scope = paymentScopeRef.current;
+    if (scope.quoteId !== nextQuoteId || scope.versionNumber !== nextVersion || scope.connected !== backendConnected) {
+      paymentScopeRef.current = { ...scope, generation: scope.generation + 1,
+        quoteId: nextQuoteId, versionNumber: nextVersion, connected: backendConnected };
+    }
+  }, [nextQuoteId, nextVersion, backendConnected]);
   useEffect(() => {
     paymentScopeRef.current.mounted = true;
     paymentScopeRef.current.generation += 1;
@@ -295,7 +297,7 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
       isUncertain,
       items: calc.items,
       totalAmount: calc.totalAmount,
-      notes: `Revised per customer request: \\\\\\\\\\\"${draft.prompt}\\\\\\\\\\\". ${calc.notes}`
+      notes: `Revised per customer request: "${draft.prompt}". ${calc.notes}`
     };
   };
  
@@ -311,7 +313,7 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
       // Inherit from existing active version if unambiguous
       let existingDimensions = '';
       let existingMaterial = '';
-      let existingDrawers = 2;
+      let existingDrawers = 0;
       let existingDelivery = activeVersion.items.some(it => it.category === 'shipping');
  
       for (const it of activeVersion.items) {
@@ -370,6 +372,7 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
     setIsSubmittingRevision(true);
     try {
       const derived = updateRevisionDraftWithCalc(pendingRevisionDraft);
+      if (derived.isUncertain) throw new Error(derived.notes);
       const newVersionNum = selectedQuote.versions.length + 1;
  
       const newVersion: QuoteVersion = {
@@ -432,25 +435,26 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
   };
  
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
+    <div className="cq-workspace space-y-7">
       
       {/* Customer Header Banner */}
-      <div className="bg-gradient-to-r from-stone-900 to-amber-950 rounded-3xl p-6 md:p-8 text-white shadow-xl flex flex-col md:flex-row items-center justify-between gap-6 border border-stone-800">
+      <div className="bg-slate-900 rounded-2xl p-6 md:p-8 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-6 border border-slate-800">
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <span className="bg-amber-500/30 text-amber-300 border border-amber-400/30 text-xs px-3 py-1 rounded-full font-medium">
-              Customer Approval & Quote Portal
+            <span className="bg-indigo-400/15 text-indigo-200 border border-indigo-300/20 text-xs px-3 py-1 rounded-full font-medium">
+              CUSTOMER PORTAL
             </span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Your Custom Furniture Quote</h1>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Your quote, clearly explained</h1>
           <p className="text-stone-300 text-sm mt-1">
             Review your custom order from <span className="font-semibold text-white">{settings.businessName}</span>, examine itemized changes, and approve quote versions.
           </p>
         </div>
  
         <div className="bg-stone-900/80 p-3 rounded-2xl border border-stone-700 w-full md:w-auto">
-          <label className="block text-xs font-semibold text-amber-300 mb-1">Select Quote / Order:</label>
+          <label htmlFor="customer-quote" className="block text-xs font-semibold text-slate-300 mb-2">Your quote</label>
           <select
+            id="customer-quote"
             value={selectedQuoteId}
             onChange={(e) => setSelectedQuoteId(e.target.value)}
             disabled={isSubmittingApproval || isSubmittingRevision || isVerifyingPayment || !!savedAttempt}
@@ -458,7 +462,7 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
           >
             {quotes.map(q => (
               <option key={q.id} value={q.id}>
-                {q.quoteNumber} - {q.customerName} (${q.versions[q.versions.length - 1]?.totalAmount.toLocaleString()})
+                {q.quoteNumber} - {q.customerName} ({formatMoney(q.versions.find(v=>v.versionNumber === q.currentVersion)?.totalAmount ?? 0)})
               </option>
             ))}
           </select>
@@ -473,10 +477,10 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
       )}
  
       {selectedQuote && activeVersion ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
           {/* Left Column: Quote Summary & Itemized Details */}
-          <div className="lg:col-span-2 space-y-6">
+          <div className="lg:col-span-2 space-y-6 min-w-0">
             
             <div className="bg-white rounded-2xl p-6 md:p-8 shadow-sm border border-stone-200 space-y-6">
               
@@ -484,7 +488,7 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-xl font-bold text-stone-900">{selectedQuote.quoteNumber}</span>
-                    <span className="bg-stone-100 text-stone-700 text-xs px-2.5 py-1 rounded-full font-semibold font-mono">
+                    <span className="bg-stone-100 text-stone-700 text-xs px-2.5 py-1 rounded-full font-semibold tabular-nums">
                       Version {activeVersion.versionNumber}
                     </span>
                   </div>
@@ -497,12 +501,12 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
                   {selectedQuote.paymentStatus === 'paid' ? (
                     <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2">
                       <ShieldCheck className="w-5 h-5 text-emerald-600" />
-                      <span>Paid & Completed</span>
+                      <span>Paid · confirmed</span>
                     </div>
                   ) : activeVersion.status === 'approved' ? (
                     <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2">
                       <ShieldCheck className="w-5 h-5 text-emerald-600" />
-                      <span>Quote Approved (Ready for Checkout)</span>
+                      <span>Approved · ready for checkout</span>
                     </div>
                   ) : activeVersion.status === 'sent_to_customer' ? (
                     <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-2 rounded-xl text-xs font-medium">
@@ -517,9 +521,9 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
               </div>
  
               {/* Customer Request Summary */}
-              <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-4">
-                <div className="flex items-center gap-2 text-amber-900 font-semibold text-xs mb-1">
-                  <Sparkles className="w-4 h-4 text-amber-700" />
+              <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-4">
+                <div className="flex items-center gap-2 text-indigo-900 font-semibold text-xs mb-1">
+                  <Sparkles className="w-4 h-4 text-indigo-600" />
                   <span>Your Request Summary:</span>
                 </div>
                 <p className="text-sm text-stone-900 italic">
@@ -553,10 +557,10 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
                               {item.category}
                             </span>
                           </td>
-                          <td className="p-3 text-center font-mono">{item.quantity}</td>
-                          <td className="p-3 text-right font-mono">${item.unitPrice.toLocaleString()}</td>
-                          <td className="p-3 text-right font-mono font-semibold text-stone-900">
-                            ${(item.quantity * item.unitPrice).toLocaleString()}
+                          <td className="p-3 text-center tabular-nums">{item.quantity}</td>
+                          <td className="p-3 text-right tabular-nums">{formatMoney(item.unitPrice)}</td>
+                          <td className="p-3 text-right tabular-nums font-semibold text-stone-900">
+                            {formatMoney(item.quantity * item.unitPrice)}
                           </td>
                         </tr>
                       ))}
@@ -564,8 +568,8 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
                     <tfoot>
                       <tr className="bg-stone-50 font-bold border-t border-stone-200">
                         <td colSpan={4} className="p-3 text-right text-stone-700">Total Price:</td>
-                        <td className="p-3 text-right font-mono text-xl text-amber-900">
-                          ${activeVersion.totalAmount.toLocaleString()}
+                        <td className="p-3 text-right tabular-nums text-xl text-amber-900">
+                          {formatMoney(activeVersion.totalAmount)}
                         </td>
                       </tr>
                     </tfoot>
@@ -576,25 +580,25 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
               {previousVersion && (
                 <div className="bg-stone-50 border border-stone-200 rounded-2xl p-5 space-y-3">
                   <div className="flex items-center gap-2 text-stone-900 font-bold text-xs uppercase tracking-wider">
-                    <History className="w-4 h-4 text-amber-700" />
+                    <History className="w-4 h-4 text-indigo-600" />
                     <span>Price Difference & Change History (v{previousVersion.versionNumber} vs v{activeVersion.versionNumber})</span>
                   </div>
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                     <div className="bg-white p-3.5 rounded-xl border border-stone-200">
                       <div className="text-stone-500 mb-1 font-semibold">Previous Version (v{previousVersion.versionNumber})</div>
-                      <div className="text-sm font-bold text-stone-800 line-through">${previousVersion.totalAmount.toLocaleString()}</div>
+                      <div className="text-sm font-bold text-stone-800 line-through">{formatMoney(previousVersion.totalAmount)}</div>
                       <p className="text-stone-500 mt-1 italic">&ldquo;{previousVersion.customerRequestSummary}&rdquo;</p>
                     </div>
  
                     <div className="bg-amber-50/70 p-3.5 rounded-xl border border-amber-200">
                       <div className="text-amber-900 mb-1 font-semibold">Current Version (v{activeVersion.versionNumber})</div>
-                      <div className="text-sm font-bold text-stone-900">${activeVersion.totalAmount.toLocaleString()}</div>
+                      <div className="text-sm font-bold text-stone-900">{formatMoney(activeVersion.totalAmount)}</div>
                       <div className="text-xs font-semibold text-amber-900 mt-1">
                         Exact Total Difference: {activeVersion.totalAmount < previousVersion.totalAmount ? (
-                          <span className="text-emerald-700 font-bold">-${(previousVersion.totalAmount - activeVersion.totalAmount).toLocaleString()} reduction</span>
+                          <span className="text-emerald-700 font-bold">-{formatMoney(previousVersion.totalAmount - activeVersion.totalAmount)} reduction</span>
                         ) : activeVersion.totalAmount > previousVersion.totalAmount ? (
-                          <span className="text-stone-900 font-bold">+${(activeVersion.totalAmount - previousVersion.totalAmount).toLocaleString()} increase</span>
+                          <span className="text-stone-900 font-bold">+{formatMoney(activeVersion.totalAmount - previousVersion.totalAmount)} increase</span>
                         ) : (
                           <span>No total price change</span>
                         )}
@@ -609,26 +613,27 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
           </div>
  
           {/* Right Column: Revision Request & Approval */}
-          <div className="lg:col-span-1 space-y-6">
+          <div className="lg:col-span-1 space-y-6 min-w-0">
             
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-stone-200 space-y-4">
               <div className="flex items-center gap-2 text-stone-900 font-bold text-sm">
-                <Sparkles className="w-4 h-4 text-amber-700" />
-                <span>Want to Change Something?</span>
+                <Sparkles className="w-4 h-4 text-indigo-600" />
+                <span>Request a change</span>
               </div>
               <p className="text-xs text-stone-600">
-                Describe changes in normal words (e.g. &ldquo;make it one drawer and keep pickup&rdquo;). The local helper calculates price differences while keeping earlier versions intact.
+                Describe what you would like to change. Review the new estimate before sending it; earlier versions stay in your history.
               </p>
  
               <form onSubmit={handleCustomerRevisionPrompt} className="space-y-3">
                 <textarea
+                  aria-label="Describe your quote changes"
                   rows={3}
                   required
                   disabled={isSubmittingRevision || isSubmittingApproval || isVerifyingPayment || !!savedAttempt}
                   placeholder="e.g. Can we change to 1 drawer instead of 2?"
                   value={revisionInput}
                   onChange={(e) => setRevisionInput(e.target.value)}
-                  className="w-full text-sm border border-stone-300 rounded-xl p-3 outline-none focus:border-amber-700 disabled:opacity-50"
+                  className="w-full text-sm border border-stone-300 rounded-xl p-3 outline-none focus:border-indigo-500 disabled:opacity-50"
                 />
                 <button
                   type="submit"
@@ -642,7 +647,7 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
                     </>
                   ) : (
                     <>
-                      <Sparkles className="w-4 h-4 text-amber-400" />
+                      <Sparkles className="w-4 h-4 text-indigo-300" />
                       <span>Review Revision Request</span>
                     </>
                   )}
@@ -654,11 +659,11 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-stone-200 space-y-4">
               <div className="flex items-center gap-2 text-stone-900 font-bold text-sm">
                 <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                <span>Approval & Checkout Status</span>
+                <span>Approval & checkout</span>
               </div>
               
               <p className="text-xs text-stone-600">
-                Workflow rule: Revisions return to owner review. You can only approve after the owner has reviewed and sent the exact version.
+                Approve the version sent by the business. Any changes need another review before checkout.
               </p>
  
               {activeVersion.status === 'sent_to_customer' ? (
@@ -675,7 +680,7 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
                   ) : (
                     <>
                       <Check className="w-4 h-4" />
-                      <span>Approve Version {activeVersion.versionNumber} (${activeVersion.totalAmount.toLocaleString()})</span>
+                      <span>Approve Version {activeVersion.versionNumber} ({formatMoney(activeVersion.totalAmount)})</span>
                     </>
                   )}
                 </button>
@@ -687,7 +692,7 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
               ) : (
                 <div className="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-xl text-xs font-semibold space-y-1">
                   <div className="font-bold flex items-center gap-1">
-                    <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                    <AlertCircle className="w-4 h-4 text-indigo-600 shrink-0" />
                     <span>Approval Unavailable (Awaiting Owner Send)</span>
                   </div>
                   <p className="text-[11px] text-amber-900 font-normal">
@@ -697,16 +702,22 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
               )}
  
               {/* REAL V5 PayPal Checkout Container or Disconnected Banner */}
-              {backendConnected && settings.paypalConnected && settings.paypalMode === 'sandbox' && activeVersion.status === 'approved' && selectedQuote.paymentStatus !== 'paid' ? (
+              {selectedQuote.paymentStatus === 'paid' ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-2 text-xs text-emerald-900">
+                  <strong className="block">Payment confirmed · {formatMoney(activeVersion.totalAmount)}</strong>
+                  <p>Version {activeVersion.versionNumber} has been paid in PayPal Sandbox.</p>
+                  {selectedQuote.paymentId && <p className="break-all">Order reference: {selectedQuote.paymentId}</p>}
+                </div>
+              ) : backendConnected && settings.paypalConnected && settings.paypalMode === 'sandbox' && activeVersion.status === 'approved' ? (
                 <div className="space-y-3 pt-2">
                   {savedAttempt && savedAttempt.quoteId === selectedQuote.id && savedAttempt.versionNumber === activeVersion.versionNumber ? (
                     <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 space-y-2">
                       <div className="flex items-center gap-1.5 font-bold">
-                        <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                        <AlertCircle className="w-4 h-4 text-indigo-600 shrink-0" />
                         <span>Unresolved Payment Attempt Recovered</span>
                       </div>
                       <p className="text-[11px] text-stone-700">
-                        Order ID: <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-amber-200">{savedAttempt.orderID}</code>. Payment is pending confirmation or verification.
+                        Order ID: <code className="tabular-nums bg-white px-1.5 py-0.5 rounded border border-amber-200">{savedAttempt.orderID}</code>. Payment is pending confirmation or verification.
                       </p>
                       <button
                         onClick={() => executeCaptureAndVerify(savedAttempt.quoteId, savedAttempt.versionNumber, savedAttempt.orderID)}
@@ -738,7 +749,7 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
                 <div className="space-y-3 pt-2">
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-stone-600 space-y-1">
                     <div className="flex items-center gap-1.5 font-bold text-amber-900">
-                      <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                      <AlertCircle className="w-4 h-4 text-indigo-600 shrink-0" />
                       <span>Demo preview: payments unavailable</span>
                     </div>
                     <p className="text-[11px] text-stone-600">
@@ -765,130 +776,21 @@ export const CustomerPortal: React.FC<CustomerPortalProps> = ({
         </div>
       )}
  
-      {/* Pre-Finalization Editable Confirmation for Customer Revision */}
-      {pendingRevisionDraft && (
-        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-xl w-full p-6 md:p-8 shadow-2xl border border-stone-200 space-y-6 max-h-[90vh] overflow-y-auto animate-in">
-            <div className="flex items-center justify-between border-b border-stone-100 pb-4">
-              <div className="flex items-center gap-2">
-                <div className="bg-amber-100 text-amber-800 p-2 rounded-xl">
-                  <Check className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-lg text-stone-900">Confirm Revision Request</h3>
-                  <p className="text-xs text-stone-500">Review dimensions, material, drawers, and delivery before submitting revision</p>
-                </div>
-              </div>
-              <button
-                disabled={isSubmittingRevision}
-                onClick={() => setPendingRevisionDraft(null)}
-                className="text-stone-400 hover:text-stone-600 disabled:opacity-50"
-              >
-                ✕
-              </button>
-            </div>
- 
-            {pendingRevisionDraft.isUncertain && (
-              <div className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-xl text-xs font-semibold flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
-                <span>Please select valid dimensions and wood material to proceed.</span>
-              </div>
-            )}
- 
-            <div className="space-y-4 bg-stone-50 p-4 rounded-xl border border-stone-200">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-stone-700 mb-1">Dimensions / Size:</label>
-                  <select
-                    value={pendingRevisionDraft.dimensions}
-                    onChange={(e) => setPendingRevisionDraft(updateRevisionDraftWithCalc({ ...pendingRevisionDraft, dimensions: e.target.value }))}
-                    className="w-full text-sm bg-white border border-stone-300 rounded-xl p-2.5 outline-none focus:border-amber-700"
-                  >
-                    <option value="">-- Select Dimensions --</option>
-                    <option value="48-inch Compact Desk">48-inch Compact Desk</option>
-                    <option value="60-inch Standard Desk">60-inch Standard Desk</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-stone-700 mb-1">Wood Material:</label>
-                  <select
-                    value={pendingRevisionDraft.material}
-                    onChange={(e) => setPendingRevisionDraft(updateRevisionDraftWithCalc({ ...pendingRevisionDraft, material: e.target.value }))}
-                    className="w-full text-sm bg-white border border-stone-300 rounded-xl p-2.5 outline-none focus:border-amber-700"
-                  >
-                    <option value="">-- Select Material --</option>
-                    <option value="White Oak Hardwood (Solid)">White Oak Hardwood (Solid)</option>
-                    <option value="Black Walnut Upgrade">Black Walnut Upgrade</option>
-                  </select>
-                </div>
-              </div>
- 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-stone-700 mb-1">Drawer Count (0-6):</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="6"
-                    value={Number.isFinite(pendingRevisionDraft.drawers) ? pendingRevisionDraft.drawers : ''}
-                    onChange={(e) => setPendingRevisionDraft(updateRevisionDraftWithCalc({ ...pendingRevisionDraft, drawers: e.target.value === '' ? NaN : Number(e.target.value) }))}
-                    className="w-full text-sm bg-white border border-stone-300 rounded-xl p-2.5 outline-none focus:border-amber-700 font-mono"
-                  />
-                </div>
-                <div className="flex items-center pt-6">
-                  <input
-                    type="checkbox"
-                    id="revIncludeDelivery"
-                    checked={pendingRevisionDraft.includeDelivery}
-                    onChange={(e) => setPendingRevisionDraft(updateRevisionDraftWithCalc({ ...pendingRevisionDraft, includeDelivery: e.target.checked }))}
-                    className="rounded border-stone-300 text-amber-700 focus:ring-amber-700 w-4 h-4"
-                  />
-                  <label htmlFor="revIncludeDelivery" className="text-xs font-semibold text-stone-800 ml-2">
-                    Include White Glove Delivery & Setup (+$180)
-                  </label>
-                </div>
-              </div>
- 
-              <div className="pt-2 border-t border-stone-200">
-                <span className="text-xs font-bold text-stone-700 block mb-2">Updated Itemized Preview:</span>
-                <ul className="text-xs text-stone-600 space-y-1">
-                  {pendingRevisionDraft.items.map((it, i) => (
-                    <li key={i} className="flex justify-between font-mono">
-                      <span>{it.name} (Qty {it.quantity})</span>
-                      <span>${(it.quantity * it.unitPrice).toLocaleString()}</span>
-                    </li>
-                  ))}
-                </ul>
-                <div className="flex justify-between font-bold text-xs text-stone-900 pt-2 mt-2 border-t border-stone-200">
-                  <span>Total Calculated:</span>
-                  <span className="font-mono text-amber-900 text-sm">
-                    ${pendingRevisionDraft.totalAmount.toLocaleString()}
-                  </span>
-                </div>
-              </div>
-            </div>
- 
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                disabled={isSubmittingRevision}
-                onClick={() => setPendingRevisionDraft(null)}
-                className="px-4 py-2.5 bg-white border border-stone-300 rounded-xl text-xs font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmAndSubmitRevision}
-                disabled={isSubmittingRevision || pendingRevisionDraft.isUncertain}
-                className="flex items-center gap-2 px-5 py-2.5 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-semibold shadow-md disabled:opacity-50"
-              >
-                {isSubmittingRevision ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                <span>Submit Revision for Owner & Review</span>
-              </button>
-            </div>
+      {pendingRevisionDraft && <Dialog wide title="Review changes" description="Check the updated specification before sending it to the business." onClose={() => setPendingRevisionDraft(null)} busy={isSubmittingRevision}
+        footer={<><button type="button" className="cq-secondary" disabled={isSubmittingRevision} onClick={() => setPendingRevisionDraft(null)}>Cancel</button><button type="button" onClick={handleConfirmAndSubmitRevision} disabled={isSubmittingRevision || pendingRevisionDraft.isUncertain} className="cq-primary">{isSubmittingRevision ? 'Sending…' : 'Send revision for review'}</button></>}>
+        <div className="space-y-5">
+          <div className="cq-message">A revision returns to business review. Your previous quote stays in the history.</div>
+          {pendingRevisionDraft.isUncertain && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">{pendingRevisionDraft.notes}</div>}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <label className="cq-field">Desk size<select data-autofocus value={pendingRevisionDraft.dimensions} onChange={e => setPendingRevisionDraft(updateRevisionDraftWithCalc({ ...pendingRevisionDraft, dimensions:e.target.value }))}><option value="">Choose a size</option><option value="48-inch Compact Desk">48-inch compact</option><option value="60-inch Standard Desk">60-inch standard</option></select></label>
+            <label className="cq-field">Wood material<select value={pendingRevisionDraft.material} onChange={e => setPendingRevisionDraft(updateRevisionDraftWithCalc({ ...pendingRevisionDraft, material:e.target.value }))}><option value="">Choose a material</option><option value="White Oak Hardwood (Solid)">White oak hardwood</option><option value="Black Walnut Upgrade">Black walnut</option></select></label>
+            <label className="cq-field">Drawers<input type="number" min="0" max="6" step="1" value={Number.isFinite(pendingRevisionDraft.drawers) ? pendingRevisionDraft.drawers : ''} onChange={e => setPendingRevisionDraft(updateRevisionDraftWithCalc({ ...pendingRevisionDraft, drawers:e.target.value === '' ? NaN : Number(e.target.value) }))} aria-invalid={!Number.isInteger(pendingRevisionDraft.drawers) || pendingRevisionDraft.drawers < 0 || pendingRevisionDraft.drawers > 6}/><span className="cq-field-hint">A whole number from 0 to 6</span></label>
+            <label className="flex items-center gap-3 text-xs text-slate-600 sm:pt-6"><input type="checkbox" checked={pendingRevisionDraft.includeDelivery} onChange={e => setPendingRevisionDraft(updateRevisionDraftWithCalc({ ...pendingRevisionDraft, includeDelivery:e.target.checked }))}/>Include white glove delivery</label>
           </div>
+          <div className="cq-draft-summary">{pendingRevisionDraft.items.map((item,i) => <div className="cq-draft-line" key={i}><span>{item.name} × {item.quantity}</span><span>{formatMoney(item.quantity*item.unitPrice)}</span></div>)}<div className="cq-draft-total"><span>Updated estimate · USD</span><strong>{pendingRevisionDraft.isUncertain ? 'Pending' : formatMoney(pendingRevisionDraft.totalAmount)}</strong></div></div>
         </div>
-      )}
- 
+      </Dialog>}
+
     </div>
   );
 };
