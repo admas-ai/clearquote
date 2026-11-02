@@ -1,0 +1,6 @@
+{
+  "supabaseUrl": "https://qnbcjliszcgpncgaipcf.supabase.co",
+  "supabasePublishableKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFuYmNqbGlzemNncG5jZ2FpcGNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2Mzk4NjgsImV4cCI6MjEwNDIxNTg2OH0.64SM8HNjResz3_sHCyNGFyVAvzt_M4biY4LeDvRMD1c",
+  "llmUrl": "https://afwrjqbylzbohbvaufdp.supabase.co/functions/v1/admas-llm",
+  "llmRoutingKey": "admas_pk_f427b23d8feb2660053a8f6580039fa3950c3cbf1f572ca9d7be4d382b2d81d4"
+}
