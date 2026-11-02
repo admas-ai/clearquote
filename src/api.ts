@@ -1,9 +1,11 @@
 import type { Quote, PriceItem } from './types';
 import { extractWithAdmas } from './services/admasAi';
+import { createApiFetch, readDemoConnection } from './services/demoRuntime';
+const apiRequest = createApiFetch(readDemoConnection());
  
 export async function checkApiHealth(): Promise<{ available: boolean; backend?: string; paypal?: any; ai?: any }> {
   try {
-    const res = await fetch('/api/health', { method: 'GET', headers: { 'Accept': 'application/json' } });
+    const res = await apiRequest('/api/health', { method: 'GET', headers: { 'Accept': 'application/json' } });
     const contentType = res.headers.get('content-type') || '';
     if (res.ok && contentType.includes('application/json')) {
       const data = await res.json();
@@ -14,7 +16,7 @@ export async function checkApiHealth(): Promise<{ available: boolean; backend?: 
 }
  
 export async function apiFetchQuotes(): Promise<Quote[]> {
-  const res = await fetch('/api/quotes');
+  const res = await apiRequest('/api/quotes');
   if (!res.ok) throw new Error('Failed to fetch quotes from server');
   return res.json();
 }
@@ -28,7 +30,7 @@ export async function apiCreateQuote(payload: {
   notes?: string;
   businessNotes?: string;
 }): Promise<Quote> {
-  const res = await fetch('/api/quotes', {
+  const res = await apiRequest('/api/quotes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -51,7 +53,7 @@ export async function apiUpdateQuote(id: string, payload: {
   notes?: string;
   businessNotes?: string;
 }): Promise<Quote> {
-  const res = await fetch(`/api/quotes/${id}`, {
+  const res = await apiRequest(`/api/quotes/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -64,13 +66,13 @@ export async function apiUpdateQuote(id: string, payload: {
 }
  
 export async function apiFetchPrices(): Promise<PriceItem[]> {
-  const res = await fetch('/api/prices');
+  const res = await apiRequest('/api/prices');
   if (!res.ok) throw new Error('Failed to fetch prices');
   return res.json();
 }
  
 export async function apiUpdatePrices(prices: PriceItem[]): Promise<PriceItem[]> {
-  const res = await fetch('/api/prices', {
+  const res = await apiRequest('/api/prices', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(prices)
@@ -84,14 +86,14 @@ export async function apiUpdatePrices(prices: PriceItem[]): Promise<PriceItem[]>
  
 export async function apiFetchPayPalConfig(): Promise<{ configured: boolean; clientId: string; mode: string }> {
   try {
-    const res = await fetch('/api/paypal/config');
+    const res = await apiRequest('/api/paypal/config');
     if (res.ok) return res.json();
   } catch {}
   return { configured: false, clientId: '', mode: 'sandbox' };
 }
  
 export async function apiCreatePayPalOrder(quoteId: string, versionNumber: number): Promise<{ orderID: string; status: string; clientId: string }> {
-  const res = await fetch('/api/paypal/create-order', {
+  const res = await apiRequest('/api/paypal/create-order', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ quoteId, versionNumber })
@@ -104,7 +106,7 @@ export async function apiCreatePayPalOrder(quoteId: string, versionNumber: numbe
 }
  
 export async function apiCapturePayPalOrder(quoteId: string, versionNumber: number, orderID: string): Promise<any> {
-  const res = await fetch('/api/paypal/capture-order', {
+  const res = await apiRequest('/api/paypal/capture-order', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ quoteId, versionNumber, orderID })
@@ -119,7 +121,7 @@ export async function apiCapturePayPalOrder(quoteId: string, versionNumber: numb
 export async function apiExtractAiPrompt(prompt: string): Promise<any> {
   const managed = await extractWithAdmas(prompt);
   if (managed) return managed;
-  const res = await fetch('/api/ai/extract', {
+  const res = await apiRequest('/api/ai/extract', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt })
