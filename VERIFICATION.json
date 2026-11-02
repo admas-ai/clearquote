@@ -18,5 +18,21 @@
   "catalog_total_usd": 1130,
   "evidence": "Actual ClearQuote preview draft plus Admas Cloud recent application-AI audit",
   "paypal_live_verification": false,
-  "submission_completed": false
+  "submission_completed": false,
+  "release": "0.1.0",
+  "automated_checks": {
+    "pricing_ai_auth_access_launcher": 15,
+    "checkout_lifecycle": 18,
+    "backend_fake_provider": 16,
+    "production_build": "passed",
+    "lint": "completed_with_existing_warnings"
+  },
+  "owner_runtime": {
+    "https_backend": "observed_connected",
+    "paypal_sdk": "rendered",
+    "approval_page": "opened_blank",
+    "buyer_approval": false,
+    "capture_verified": false
+  },
+  "new_tunnel_ai_origin": "not_registered_supported_control_unavailable"
 }
