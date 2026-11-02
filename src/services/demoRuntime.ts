@@ -7,7 +7,9 @@ export function parseDemoConnection(value: unknown): DemoConnection | null {
   if (typeof candidate.origin !== 'string' || typeof candidate.access !== 'string' || !/^[A-Za-z0-9_-]{40,}$/.test(candidate.access)) return null;
   try {
     const url = new URL(candidate.origin);
-    if (url.protocol !== 'https:' || url.origin !== candidate.origin || !/^[a-z0-9-]+\.trycloudflare\.com$/.test(url.hostname) || url.hostname === 'api.trycloudflare.com') return null;
+    const suffix = '.trycloudflare.com';
+    const tunnelHost = url.hostname.endsWith(suffix) && /^[a-z0-9-]+$/.test(url.hostname.slice(0, -suffix.length));
+    if (url.protocol !== 'https:' || url.origin !== candidate.origin || !tunnelHost || url.hostname === 'api.trycloudflare.com') return null;
     return { origin: url.origin, access: candidate.access };
   } catch { return null; }
 }
