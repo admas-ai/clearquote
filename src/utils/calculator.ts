@@ -1,4 +1,5 @@
 import type { PriceItem, QuoteItem } from '../types';
+import { moneyToCents } from './currency.ts';
  
 export interface ExtractionResult {
   dimensions: string; // e.g. '48-inch Compact Desk', '60-inch Standard Desk', or '' if unresolved
@@ -49,7 +50,7 @@ export function parseNaturalLanguagePrompt(prompt: string, prices: PriceItem[]):
  
   // Drawers (0..6 using escape-free word/number parser)
   const drawerWords: Record<string,number> = {zero:0,no:0,one:1,single:1,two:2,three:3,four:4,five:5,six:6};
-  const drawerMatch = lower.match(/(?:^|[^a-z0-9])(zero|no|one|single|two|three|four|five|six|[0-9]+)[ ]*drawers?(?:$|[^a-z])/i);
+  const drawerMatch = lower.match(/(?:^|[^a-z0-9.,+/-])(zero|no|one|single|two|three|four|five|six|[0-9]+)[ ]*drawers?(?:$|[^a-z])/i);
   let drawers = lower.includes('drawer') ? -1 : 2;
   if (drawerMatch) {
     const token = drawerMatch[1];
@@ -75,102 +76,36 @@ export function parseNaturalLanguagePrompt(prompt: string, prices: PriceItem[]):
     dimensions,
     material,
     drawers,
-    includeDelivery: includeDelivery !== null ? includeDelivery : true,
+    includeDelivery: includeDelivery !== null ? includeDelivery : false,
     isUncertain,
     uncertainWarning
   };
 }
  
 export function calculateQuoteItems(
-  prices: PriceItem[],
-  dimensions: string,
-  material: string,
-  drawers: number,
-  includeDelivery: boolean
+  prices: PriceItem[], dimensions: string, material: string, drawers: number, includeDelivery: boolean
 ): { items: QuoteItem[]; totalAmount: number; notes: string; isUncertain: boolean } {
-  const items: QuoteItem[] = [];
-  const is48 = dimensions.includes('48');
- 
-  // Validate drawers 0..6
-  const validDrawers = Number.isInteger(drawers) && Number.isFinite(drawers) && drawers >= 0 && drawers <= 6 ? drawers : -1;
-  const matPriceItem = prices.find(p => p.name === material && p.category === 'material');
- 
-  // Missing applicable catalog entries or unsupported dimensions/material must make draft unresolved
-  const isSupportedDim = dimensions === '48-inch Compact Desk' || dimensions === '60-inch Standard Desk';
-  const isSupportedMat = !!matPriceItem;
-  const isUncertain = !isSupportedDim || !isSupportedMat || validDrawers < 0;
- 
-  if (isUncertain) {
-    return { items: [], totalAmount: 0, notes: 'Unresolved or unsupported configuration.', isUncertain: true };
-  }
- 
-  let baseMatPrice = matPriceItem!.basePrice;
-  if (is48) {
-    // Documented compact adjustment 100 below current standard catalog base
-    baseMatPrice = baseMatPrice - 100;
-  }
- 
-  items.push({
-    id: 'i-mat-1',
-    name: material,
-    quantity: 1,
-    unitPrice: baseMatPrice,
-    category: 'material',
-    notes: dimensions
-  });
- 
-  if (validDrawers > 0) {
-    const drawerItem = prices.find(p => p.category === 'hardware');
-    if (!drawerItem) {
-      return { items: [], totalAmount: 0, notes: 'Missing hardware catalog entry.', isUncertain: true };
-    }
-    items.push({
-      id: 'i-draw-1',
-      name: drawerItem.name,
-      quantity: validDrawers,
-      unitPrice: drawerItem.basePrice,
-      category: 'hardware',
-      notes: `${validDrawers} custom dovetail drawer(s) with soft-close`
-    });
-  }
- 
-  const laborItem = prices.find(p => p.category === 'labor');
-  if (!laborItem) {
-    return { items: [], totalAmount: 0, notes: 'Missing labor catalog entry.', isUncertain: true };
-  }
-  items.push({
-    id: 'i-finish-1',
-    name: laborItem.name,
-    quantity: 1,
-    unitPrice: laborItem.basePrice,
-    category: 'labor',
-    notes: 'Protective natural oil finish'
-  });
- 
-  if (includeDelivery) {
-    const shipItem = prices.find(p => p.category === 'shipping' && p.name.includes('White Glove'));
-    if (!shipItem) {
-      return { items: [], totalAmount: 0, notes: 'Missing shipping catalog entry.', isUncertain: true };
-    }
-    items.push({
-      id: 'i-ship-1',
-      name: shipItem.name,
-      quantity: 1,
-      unitPrice: shipItem.basePrice,
-      category: 'shipping',
-      notes: 'White glove delivery & setup'
-    });
-  }
- 
-  const totalAmount = items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
-  
-  let notes = `Configured ${dimensions}; ${material}; ${validDrawers} drawer(s). `;
-  if (includeDelivery) {
-    notes += 'Includes white glove delivery & setup.';
-  } else {
-    notes += 'Workshop pickup (delivery fee excluded).';
-  }
- 
-  return { items, totalAmount, notes, isUncertain: false };
+  const unresolved = (notes: string) => ({ items: [], totalAmount: 0, notes, isUncertain: true });
+  if (!['48-inch Compact Desk', '60-inch Standard Desk'].includes(dimensions)) return unresolved('Choose a supported desk size.');
+  if (!Number.isInteger(drawers) || drawers < 0 || drawers > 6) return unresolved('Enter a whole number of drawers from 0 to 6.');
+  const materialItem = prices.find(item => item.name === material && item.category === 'material');
+  if (!materialItem) return unresolved('Choose a material available in the catalog.');
+  const base = moneyToCents(materialItem.basePrice);
+  if (base === null || (dimensions.startsWith('48') && base < 10000)) return unresolved('The material price needs review in the catalog.');
+  const items: QuoteItem[] = [{ id: 'i-mat-1', name: material, quantity: 1,
+    unitPrice: (base - (dimensions.startsWith('48') ? 10000 : 0)) / 100, category: 'material', notes: dimensions }];
+  const addCatalogItem = (item: PriceItem | undefined, quantity: number, id: string, notes: string) => {
+    if (!item) return false;
+    const cents = moneyToCents(item.basePrice);
+    if (cents === null) return false;
+    items.push({ id, name: item.name, quantity, unitPrice: cents / 100, category: item.category, notes });
+    return true;
+  };
+  if (drawers > 0 && !addCatalogItem(prices.find(item => item.category === 'hardware'), drawers, 'i-draw-1', `${drawers} custom dovetail drawer(s) with soft-close`)) return unresolved('The drawer hardware price is missing or invalid.');
+  if (!addCatalogItem(prices.find(item => item.category === 'labor'), 1, 'i-finish-1', 'Protective natural oil finish')) return unresolved('The finish labor price is missing or invalid.');
+  if (includeDelivery && !addCatalogItem(prices.find(item => item.category === 'shipping' && item.name.includes('White Glove')), 1, 'i-ship-1', 'White glove delivery & setup')) return unresolved('The delivery price is missing or invalid.');
+  const totalCents = items.reduce((sum, item) => sum + moneyToCents(item.unitPrice)! * item.quantity, 0);
+  if (!Number.isSafeInteger(totalCents) || totalCents <= 0) return unresolved('The quote total needs review in the catalog.');
+  return { items, totalAmount: totalCents / 100, isUncertain: false,
+    notes: `Configured ${dimensions}; ${material}; ${drawers} drawer(s). ${includeDelivery ? 'Includes white glove delivery & setup.' : 'Workshop pickup (delivery fee excluded).'}` };
 }
- 
