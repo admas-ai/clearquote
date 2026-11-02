@@ -232,7 +232,7 @@ async function getPayPalAccessToken(clientId, clientSecret) {
   }
 }
  
-const requestGuard = createRequestGuard({ publicOrigin: process.env.PUBLIC_ORIGIN, accessToken: process.env.DEMO_ACCESS_TOKEN });
+const requestGuard = createRequestGuard({ publicOrigin: process.env.PUBLIC_ORIGIN, accessToken: process.env.DEMO_ACCESS_TOKEN, appOrigin: process.env.DEMO_APP_ORIGIN });
 
 export function handleApiRequest(req, res, next) {
   if (!requestGuard(req, res)) return true;
@@ -251,7 +251,7 @@ export function handleApiRequest(req, res, next) {
   const localOrigin = `http://${hostHeader}`;
   const originHeader = req.headers.origin;
   if (originHeader) {
-    if (originHeader !== localOrigin && originHeader !== process.env.PUBLIC_ORIGIN) {
+    if (originHeader !== localOrigin && originHeader !== process.env.PUBLIC_ORIGIN && originHeader !== process.env.DEMO_APP_ORIGIN) {
       if (req.method === 'OPTIONS') {
         res.writeHead(403);
         res.end();
