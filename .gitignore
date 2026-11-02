@@ -29,3 +29,6 @@ dist-ssr
 *.sln
 *.sw?
  
+
+# Generated fake-SDK test report
+/checkout-test-results.json
