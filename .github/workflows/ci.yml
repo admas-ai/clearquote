@@ -2,6 +2,9 @@ name: Validate ClearQuote
 on:
   push:
   pull_request:
+concurrency:
+  group: clearquote-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
