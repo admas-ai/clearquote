@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
 import type { Quote, PriceItem, QuoteItem, QuoteVersion } from '../types';
 import { apiExtractAiPrompt } from '../api';
-import { Sparkles, Send, Eye, Edit3, RefreshCw, Check, AlertCircle } from 'lucide-react';
-import { parseNaturalLanguagePrompt, calculateQuoteItems } from '../utils/calculator';
+import { Sparkles, Send, Eye, Edit3, RefreshCw, Check, AlertCircle, FileText, Clock3, CircleCheck } from 'lucide-react';
+import { parseNaturalLanguagePrompt } from '../utils/calculator';
+import { calculateDraft, canConfirmDraft, parseDrawerInput } from '../utils/draft';
+import { formatMoney, itemTotal } from '../utils/currency';
+import { Dialog } from './Dialog';
  
 interface OwnerDashboardProps {
+  businessName: string;
   quotes: Quote[];
   prices: PriceItem[];
   onUpdateQuote: (updatedQuote: Quote) => Promise<Quote>;
@@ -13,6 +17,7 @@ interface OwnerDashboardProps {
 }
  
 export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
+  businessName,
   quotes,
   prices,
   onUpdateQuote,
@@ -20,6 +25,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   onOpenCustomerViewForQuote
 }) => {
   const [selectedQuoteId, setSelectedQuoteId] = useState<string>(quotes[0]?.id || '');
+  const [search, setSearch] = useState('');
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [customerNameInput, setCustomerNameInput] = useState('');
@@ -43,6 +49,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     uncertainWarning: string;
     items: QuoteItem[];
     notes: string;
+    totalAmount: number;
+    source: string;
   } | null>(null);
  
   const [isEditing, setIsEditing] = useState(false);
@@ -64,7 +72,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     setInlineError(null);
     setIsSubmittingAction(true);
     try {
-      const newTotal = editItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+      const newTotal = itemTotal(editItems);
+      if (newTotal === null) throw new Error('Review item quantities and prices before saving.');
       const newVersionNumber = selectedQuote.versions.length + 1;
  
       const newVersion: QuoteVersion = {
@@ -125,18 +134,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     }
   };
  
-  const updateDraftWithCalculation = (draft: NonNullable<typeof pendingDraft>) => {
-    const calc = calculateQuoteItems(prices, draft.dimensions, draft.material, draft.drawers, draft.includeDelivery);
-    const isUncertain = !draft.dimensions || !draft.material;
-    return {
-      ...draft,
-      isUncertain,
-      uncertainWarning: isUncertain ? 'Please select valid dimensions and material before confirming.' : '',
-      items: calc.items,
-      notes: calc.notes
-    };
-  };
- 
+  const updateDraftWithCalculation = (draft: NonNullable<typeof pendingDraft>) => calculateDraft(prices, draft);
+
   const handleAiGenerateQuote = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!aiPrompt.trim() || !customerNameInput.trim()) return;
@@ -147,7 +146,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
  
     try {
       const aiRes = await apiExtractAiPrompt(aiPrompt);
-      if (aiRes && aiRes.extracted) {
+      if (aiRes?.status === 'success' && aiRes.extracted) {
         const ext = aiRes.extracted;
         extractionStatus = aiRes.status === 'success' ? 'success' : 'fallback_local';
         const rawDraft = {
@@ -158,10 +157,12 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           dimensions: ext.dimensions || '',
           drawers: ext.drawers ?? 2,
           material: ext.material || '',
-          includeDelivery: ext.includeDelivery ?? true,
+          includeDelivery: ext.includeDelivery ?? false,
           isUncertain: !ext.dimensions || !ext.material,
           uncertainWarning: (!ext.dimensions || !ext.material) ? 'Please specify dimensions and material.' : '',
           items: [],
+          totalAmount: 0,
+          source: aiRes.source || 'AI provider',
           notes: extractionStatus === 'success' ? `AI draft via ${aiRes.source || 'configured AI provider'} — prices from catalog; review required` : 'Draft via local rule-based helper (no AI request)'
         };
         setPendingDraft(updateDraftWithCalculation(rawDraft));
@@ -186,7 +187,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       isUncertain: extracted.isUncertain,
       uncertainWarning: extracted.uncertainWarning,
       items: [],
-      notes: 'Calculated via Rule-Based Local NLP Helper (Source: fallback_local)'
+      totalAmount: 0,
+      source: 'Local helper',
+      notes: 'Draft prepared with the local helper.'
     };
  
     setPendingDraft(updateDraftWithCalculation(rawDraft));
@@ -194,12 +197,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     setIsAiModalOpen(false);
   };
  
-  const isSupportedDraft = (draft: NonNullable<typeof pendingDraft>) => {
-    const validSizes = ['48-inch Compact Desk', '60-inch Standard Desk'];
-    const validMaterials = ['White Oak Hardwood (Solid)', 'Black Walnut Upgrade'];
-    return Boolean(draft.dimensions && draft.material && validSizes.includes(draft.dimensions) && validMaterials.includes(draft.material) && !draft.isUncertain);
-  };
- 
+  const isSupportedDraft = (draft: NonNullable<typeof pendingDraft>) => canConfirmDraft(draft);
+
   const handleConfirmAndCreateQuote = async () => {
     if (!pendingDraft || !isSupportedDraft(pendingDraft)) return;
     setInlineError(null);
@@ -207,11 +206,17 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
  
     try {
       const derived = updateDraftWithCalculation(pendingDraft);
-      const total = derived.items.reduce((s, i) => s + (i.quantity * i.unitPrice), 0);
-      const newQuoteNum = `CQ-2026-0${Math.floor(90 + Math.random() * 90)}`;
+      if (!isSupportedDraft(derived)) {
+        setPendingDraft(derived);
+        setInlineError(derived.uncertainWarning);
+        return;
+      }
+      const total = derived.totalAmount;
+      const sequence = Math.max(0, ...quotes.map(quote => Number(quote.quoteNumber.split('-').at(-1)) || 0)) + 1;
+      const newQuoteNum = `CQ-${new Date().getFullYear()}-${String(sequence).padStart(4, '0')}`;
  
       const newQuote: Quote = {
-        id: `q-${Date.now()}`,
+        id: `q-${crypto.randomUUID()}`,
         quoteNumber: newQuoteNum,
         customerName: derived.customerName,
         customerEmail: derived.customerEmail,
@@ -247,109 +252,54 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     }
   };
  
+  const currentVersion = (quote: Quote) => quote.versions.find(version => version.versionNumber === quote.currentVersion) || quote.versions.at(-1);
+  const awaitingApproval = quotes.filter(quote => quote.paymentStatus !== 'paid' && currentVersion(quote)?.status === 'sent_to_customer').length;
+  const approvedValue = quotes.filter(quote => quote.paymentStatus !== 'paid' && currentVersion(quote)?.status === 'approved')
+    .reduce((total, quote) => total + (currentVersion(quote)?.totalAmount || 0), 0);
+  const visibleQuotes = quotes.filter(quote => `${quote.quoteNumber} ${quote.customerName}`.toLowerCase().includes(search.trim().toLowerCase()));
+  const statusLabels: Record<string,string> = {draft:'Draft',pending_review:'Draft',sent_to_customer:'Awaiting approval',approved:'Approved',superseded:'Previous version',rejected:'Changes requested'};
+  const statusLabel = (quote: Quote) => quote.paymentStatus === 'paid' ? 'Paid' : (statusLabels[currentVersion(quote)?.status || 'pending_review'] || 'Draft');
+
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-      
-      {/* Top Bar / Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Business Owner Dashboard</h1>
-            <span className="bg-amber-100 text-amber-900 text-xs px-3 py-1 rounded-full font-semibold border border-amber-200">
-              Oak & Iron Custom Woodworking
-            </span>
-          </div>
-          <p className="text-sm text-stone-600 mt-1">Review customer requests, organize with NLP quote helper, review itemized quotes, and manage studio workflows.</p>
-        </div>
- 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setIsAiModalOpen(true)}
-            className="flex items-center gap-2 bg-gradient-to-r from-stone-900 to-stone-800 hover:from-stone-800 hover:to-stone-700 text-white px-5 py-2.5 rounded-xl font-medium text-xs shadow-md transition"
-          >
-            <Sparkles className="w-4 h-4 text-amber-400" />
-            <span>New Quote</span>
-          </button>
-        </div>
+    <div className="cq-workspace">
+      <div className="cq-workspace-heading">
+        <div><p className="cq-eyebrow">{businessName}</p><h1>Quote workspace</h1><p>Clear estimates. Confident approvals. Simpler payments.</p></div>
+        <button type="button" onClick={() => setIsAiModalOpen(true)} className="cq-primary"><Sparkles size={16} />New quote</button>
       </div>
- 
-      {inlineError && (
-        <div className="bg-rose-500 text-white p-3 rounded-xl text-xs font-semibold flex items-center justify-between">
-          <span>{inlineError}</span>
-          <button onClick={() => setInlineError(null)} className="underline ml-2">Dismiss</button>
-        </div>
-      )}
- 
-      {/* Main Grid: Quote List Sidebar + Detail View */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Quote List Sidebar */}
-        <div className="lg:col-span-1 space-y-4">
-          <div className="bg-white rounded-2xl p-4 shadow-sm border border-stone-200">
-            <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">Customer Quotes & Requests</h2>
-            
-            <div className="space-y-2.5">
-              {quotes.map((q) => {
-                const latestV = q.versions[q.versions.length - 1];
-                const isSelected = q.id === selectedQuoteId;
-                return (
-                  <div
-                    key={q.id}
-                    onClick={() => {
-                      setSelectedQuoteId(q.id);
-                      setIsEditing(false);
-                    }}
-                    className={`p-3.5 rounded-xl cursor-pointer transition border ${
-                      isSelected
-                        ? 'bg-amber-50/70 border-amber-300 shadow-sm'
-                        : 'bg-white hover:bg-stone-50 border-stone-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-bold text-sm text-stone-900">{q.quoteNumber}</span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase ${
-                        q.paymentStatus === 'paid'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : latestV?.status === 'approved'
-                          ? 'bg-blue-100 text-blue-800'
-                          : latestV?.status === 'sent_to_customer'
-                          ? 'bg-amber-100 text-amber-900'
-                          : 'bg-stone-100 text-stone-700'
-                      }`}>
-                        {q.paymentStatus === 'paid' ? 'Paid' : latestV?.status.replace(/_/g, ' ')}
-                      </span>
-                    </div>
-                    <div className="text-xs font-medium text-stone-800 truncate">{q.customerName}</div>
-                    <div className="flex items-center justify-between text-[11px] text-stone-500 mt-2">
-                      <span>Ver {q.currentVersion} • ${latestV?.totalAmount.toLocaleString()}</span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenCustomerViewForQuote(q.id);
-                        }}
-                        className="text-amber-700 hover:underline flex items-center gap-1 font-semibold"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>Portal</span>
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
- 
+      <div className="cq-metrics" aria-label="Quote overview">
+        <div className="cq-metric"><div><div className="cq-metric-label">Total quotes</div><p className="cq-metric-value">{quotes.length}</p></div><span className="cq-metric-icon"><FileText size={18} /></span></div>
+        <div className="cq-metric"><div><div className="cq-metric-label">Awaiting approval</div><p className="cq-metric-value">{awaitingApproval}</p></div><span className="cq-metric-icon"><Clock3 size={18} /></span></div>
+        <div className="cq-metric"><div><div className="cq-metric-label">Approved to pay</div><p className="cq-metric-value">{formatMoney(approvedValue)}</p></div><span className="cq-metric-icon"><CircleCheck size={18} /></span></div>
+      </div>
+      {inlineError && <div role="alert" className="bg-rose-50 border border-rose-200 text-rose-800 p-3 rounded-xl text-xs flex items-center justify-between mb-5"><span>{inlineError}</span><button type="button" onClick={() => setInlineError(null)} className="underline ml-3">Dismiss</button></div>}
+      <div className="cq-quote-layout">
+        <aside className="cq-list-panel" aria-label="Quotes">
+          <div className="cq-list-heading"><h2>All quotes</h2><span>{quotes.length} total</span></div>
+          <div className="cq-search"><input type="search" aria-label="Search quotes" placeholder="Search name or quote…" value={search} onChange={event => setSearch(event.target.value)} /></div>
+          {visibleQuotes.map(quote => {
+            const version = currentVersion(quote);
+            const selected = selectedQuote?.id === quote.id;
+            return <article key={quote.id} className={`cq-quote-row${selected ? ' is-selected' : ''}`}>
+              <button type="button" className="cq-quote-select" aria-pressed={selected} onClick={() => { setSelectedQuoteId(quote.id); setIsEditing(false); }}>
+                <small>{quote.quoteNumber}</small><strong>{quote.customerName}</strong>
+                <span className={`text-[10px] px-2 py-1 rounded-full font-semibold ${quote.paymentStatus === 'paid' ? 'bg-emerald-100 text-emerald-800' : version?.status === 'approved' ? 'bg-indigo-100 text-indigo-700' : version?.status === 'sent_to_customer' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>{statusLabel(quote)}</span>
+              </button>
+              <div className="cq-quote-row-foot"><span>v{quote.currentVersion} · {formatMoney(version?.totalAmount || 0)}</span><button type="button" aria-label={`Open customer portal for ${quote.customerName}`} onClick={() => onOpenCustomerViewForQuote(quote.id)}><Eye size={13} />Portal</button></div>
+            </article>;
+          })}
+          {!visibleQuotes.length && <div className="cq-empty">{search ? 'No matching quotes. Try another name or quote number.' : 'Your first quote starts here. Choose New quote to prepare an estimate.'}</div>}
+        </aside>
+
         {/* Right Detail View */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="space-y-6 min-w-0">
           {selectedQuote && activeVersion ? (
             <div className="bg-white rounded-2xl p-6 md:p-8 shadow-sm border border-stone-200 space-y-6">
               
               <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-stone-200 gap-4">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-xl font-bold text-stone-900">{selectedQuote.quoteNumber}</h2>
-                    <span className="bg-stone-100 text-stone-700 text-xs px-2.5 py-1 rounded-full font-semibold font-mono">
+                    <span className="bg-stone-100 text-stone-700 text-xs px-2.5 py-1 rounded-full font-semibold tabular-nums">
                       Version {activeVersion.versionNumber} ({activeVersion.status.replace(/_/g, ' ')})
                     </span>
                   </div>
@@ -414,9 +364,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               </div>
  
               {/* Request Summary */}
-              <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-4">
-                <div className="flex items-center gap-2 text-amber-900 font-semibold text-xs mb-1">
-                  <Sparkles className="w-4 h-4 text-amber-700" />
+              <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-4">
+                <div className="flex items-center gap-2 text-indigo-900 font-semibold text-xs mb-1">
+                  <Sparkles className="w-4 h-4 text-indigo-600" />
                   <span>Customer Request Summary:</span>
                 </div>
                 <p className="text-sm text-stone-900 italic">
@@ -450,40 +400,44 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                               {item.category}
                             </span>
                           </td>
-                          <td className="p-3 text-center font-mono">
+                          <td className="p-3 text-center tabular-nums">
                             {isEditing ? (
                               <input
                                 type="number"
                                 min="1"
-                                value={item.quantity}
+                                step="1"
+                                aria-label={`Quantity for ${item.name}`}
+                                value={Number.isNaN(item.quantity) ? '' : item.quantity}
                                 onChange={(e) => {
-                                  const val = parseInt(e.target.value) || 1;
+                                  const val = e.target.value === '' ? NaN : Number(e.target.value);
                                   const copy = [...editItems];
                                   copy[i].quantity = val;
                                   setEditItems(copy);
                                 }}
-                                className="w-16 border border-stone-300 rounded p-1 text-center font-mono text-xs"
+                                className="w-16 border border-stone-300 rounded p-1 text-center tabular-nums text-xs"
                               />
                             ) : item.quantity}
                           </td>
-                          <td className="p-3 text-right font-mono">
+                          <td className="p-3 text-right tabular-nums">
                             {isEditing ? (
                               <input
                                 type="number"
                                 min="0"
-                                value={item.unitPrice}
+                                step="0.01"
+                                aria-label={`Unit price for ${item.name}`}
+                                value={Number.isNaN(item.unitPrice) ? '' : item.unitPrice}
                                 onChange={(e) => {
-                                  const val = parseFloat(e.target.value) || 0;
+                                  const val = e.target.value === '' ? NaN : Number(e.target.value);
                                   const copy = [...editItems];
                                   copy[i].unitPrice = val;
                                   setEditItems(copy);
                                 }}
-                                className="w-24 border border-stone-300 rounded p-1 text-right font-mono text-xs"
+                                className="w-24 border border-stone-300 rounded p-1 text-right tabular-nums text-xs"
                               />
-                            ) : `$${item.unitPrice.toLocaleString()}`}
+                            ) : formatMoney(item.unitPrice)}
                           </td>
-                          <td className="p-3 text-right font-mono font-semibold text-stone-900">
-                            ${(item.quantity * item.unitPrice).toLocaleString()}
+                          <td className="p-3 text-right tabular-nums font-semibold text-stone-900">
+                            {formatMoney(item.quantity * item.unitPrice)}
                           </td>
                         </tr>
                       ))}
@@ -491,8 +445,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                     <tfoot>
                       <tr className="bg-stone-50 font-bold border-t border-stone-200">
                         <td colSpan={4} className="p-3 text-right text-stone-700">Total Price:</td>
-                        <td className="p-3 text-right font-mono text-xl text-amber-900">
-                          ${(!isEditing ? activeVersion.totalAmount : editItems.reduce((s, i) => s + (i.quantity * i.unitPrice), 0)).toLocaleString()}
+                        <td className="p-3 text-right tabular-nums text-xl text-indigo-900">
+                          {!isEditing ? formatMoney(activeVersion.totalAmount) : itemTotal(editItems) === null ? 'Review items' : formatMoney(itemTotal(editItems)!)}
                         </td>
                       </tr>
                     </tfoot>
@@ -509,7 +463,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                     </button>
                     <button
                       onClick={handleSaveRevision}
-                      disabled={isSubmittingAction}
+                      disabled={isSubmittingAction || itemTotal(editItems) === null}
                       className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-md disabled:opacity-50"
                     >
                       {isSubmittingAction ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
@@ -529,209 +483,40 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
  
       </div>
  
-      {/* AI / Local Helper Modal */}
-      {isAiModalOpen && (
-        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 md:p-8 shadow-2xl border border-stone-200 space-y-6">
-            <div className="flex items-center justify-between border-b border-stone-100 pb-4">
-              <div className="flex items-center gap-2">
-                <div className="bg-amber-100 text-amber-800 p-2 rounded-xl">
-                  <Sparkles className="w-5 h-5 text-amber-700" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-lg text-stone-900">New Quote</h3>
-                  <p className="text-xs text-stone-500">Enter customer details and natural language project prompt</p>
-                </div>
-              </div>
-              <button onClick={() => setIsAiModalOpen(false)} className="text-stone-400 hover:text-stone-600">✕</button>
-            </div>
- 
-            <form onSubmit={handleAiGenerateQuote} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Customer Name:</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Sarah Jenkins"
-                  value={customerNameInput}
-                  onChange={(e) => setCustomerNameInput(e.target.value)}
-                  className="w-full text-sm border border-stone-300 rounded-xl p-2.5 outline-none focus:border-amber-700"
-                />
-              </div>
- 
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Customer Email (Optional):</label>
-                <input
-                  type="email"
-                  placeholder="e.g. sarah@example.com"
-                  value={customerEmailInput}
-                  onChange={(e) => setCustomerEmailInput(e.target.value)}
-                  className="w-full text-sm border border-stone-300 rounded-xl p-2.5 outline-none focus:border-amber-700"
-                />
-              </div>
- 
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Customer Phone (Optional):</label>
-                <input
-                  type="text"
-                  placeholder="e.g. (555) 234-5678"
-                  value={customerPhoneInput}
-                  onChange={(e) => setCustomerPhoneInput(e.target.value)}
-                  className="w-full text-sm border border-stone-300 rounded-xl p-2.5 outline-none focus:border-amber-700"
-                />
-              </div>
- 
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Customer Request Prompt:</label>
-                <textarea
-                  rows={3}
-                  required
-                  placeholder="e.g. 48-inch oak desk with two drawers and delivery"
-                  value={aiPrompt}
-                  onChange={(e) => setAiPrompt(e.target.value)}
-                  className="w-full text-sm border border-stone-300 rounded-xl p-3 outline-none focus:border-amber-700"
-                />
-              </div>
- 
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAiModalOpen(false)}
-                  className="px-4 py-2 bg-white border border-stone-300 rounded-xl text-xs font-semibold text-stone-700"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isAnalyzing}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-semibold shadow-md disabled:opacity-50"
-                >
-                  {isAnalyzing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-amber-400" />}
-                  <span>Generate Quote</span>
-                </button>
-              </div>
-            </form>
+      {isAiModalOpen && <Dialog title="Create quote" description="Start with the customer's request. Review the specification and catalog prices next."
+        onClose={() => setIsAiModalOpen(false)} onSubmit={handleAiGenerateQuote} busy={isAnalyzing}
+        footer={<><button type="button" onClick={() => setIsAiModalOpen(false)} className="cq-secondary" disabled={isAnalyzing}>Cancel</button><button type="submit" className="cq-primary" disabled={isAnalyzing}>{isAnalyzing ? <RefreshCw size={15} className="animate-spin" /> : <Sparkles size={15} />}{isAnalyzing ? 'Preparing draft…' : 'Prepare estimate'}</button></>}>
+        <div className="space-y-4">
+          <label className="cq-field">Customer name<input data-autofocus required autoComplete="name" value={customerNameInput} onChange={event => setCustomerNameInput(event.target.value)} placeholder="e.g. Alex Morgan" /></label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <label className="cq-field">Email <span className="font-normal text-slate-400">(optional)</span><input type="email" autoComplete="email" value={customerEmailInput} onChange={event => setCustomerEmailInput(event.target.value)} placeholder="alex@example.com" /></label>
+            <label className="cq-field">Phone <span className="font-normal text-slate-400">(optional)</span><input type="tel" autoComplete="tel" value={customerPhoneInput} onChange={event => setCustomerPhoneInput(event.target.value)} placeholder="(555) 234-5678" /></label>
           </div>
+          <label className="cq-field">What would they like?<textarea required maxLength={8000} value={aiPrompt} onChange={event => setAiPrompt(event.target.value)} placeholder="A 48-inch white oak desk, two drawers, and delivery to my home." /></label>
+          <button type="button" className="text-xs text-indigo-600 font-semibold" onClick={() => { setAiPrompt('A 48-inch white oak desk with two drawers and white glove delivery.'); if (!customerNameInput) setCustomerNameInput('Alex Morgan'); }}>Use an example request</button>
+          <div className="cq-message">AI organizes the request. Your catalog determines the price. You review the draft before it is sent.</div>
         </div>
-      )}
- 
-      {/* Pre-Finalization Confirmation Modal */}
-      {pendingDraft && (
-        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-xl w-full p-6 md:p-8 shadow-2xl border border-stone-200 space-y-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-stone-100 pb-4">
-              <div className="flex items-center gap-2">
-                <div className="bg-amber-100 text-amber-800 p-2 rounded-xl">
-                  <Check className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-lg text-stone-900">Confirm Generated Quote Draft</h3>
-                  <p className="text-xs text-stone-500">Verify extracted dimensions, material, drawers, and delivery before final creation</p>
-                </div>
-              </div>
-              <button onClick={() => setPendingDraft(null)} className="text-stone-400 hover:text-stone-600">✕</button>
-            </div>
- 
-            {pendingDraft.isUncertain && (
-              <div className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-xl text-xs font-semibold flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
-                <span>{pendingDraft.uncertainWarning || 'Uncertain or missing specifications detected. Please select valid dimensions and material.'}</span>
-              </div>
-            )}
- 
-            <div className="space-y-4 bg-stone-50 p-4 rounded-xl border border-stone-200">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-stone-700 mb-1">Dimensions / Size:</label>
-                  <select
-                    value={pendingDraft.dimensions}
-                    onChange={(e) => setPendingDraft(updateDraftWithCalculation({ ...pendingDraft, dimensions: e.target.value }))}
-                    className="w-full text-sm bg-white border border-stone-300 rounded-xl p-2.5 outline-none focus:border-amber-700"
-                  >
-                    <option value="">-- Select Dimensions --</option>
-                    <option value="48-inch Compact Desk">48-inch Compact Desk</option>
-                    <option value="60-inch Standard Desk">60-inch Standard Desk</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-stone-700 mb-1">Wood Material:</label>
-                  <select
-                    value={pendingDraft.material}
-                    onChange={(e) => setPendingDraft(updateDraftWithCalculation({ ...pendingDraft, material: e.target.value }))}
-                    className="w-full text-sm bg-white border border-stone-300 rounded-xl p-2.5 outline-none focus:border-amber-700"
-                  >
-                    <option value="">-- Select Material --</option>
-                    <option value="White Oak Hardwood (Solid)">White Oak Hardwood (Solid)</option>
-                    <option value="Black Walnut Upgrade">Black Walnut Upgrade</option>
-                  </select>
-                </div>
-              </div>
- 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-stone-700 mb-1">Drawer Count (0-6):</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="6"
-                    value={pendingDraft.drawers}
-                    onChange={(e) => setPendingDraft(updateDraftWithCalculation({ ...pendingDraft, drawers: parseInt(e.target.value) || 0 }))}
-                    className="w-full text-sm bg-white border border-stone-300 rounded-xl p-2.5 outline-none focus:border-amber-700 font-mono"
-                  />
-                </div>
-                <div className="flex items-center pt-6">
-                  <input
-                    type="checkbox"
-                    id="includeDeliveryCheck"
-                    checked={pendingDraft.includeDelivery}
-                    onChange={(e) => setPendingDraft(updateDraftWithCalculation({ ...pendingDraft, includeDelivery: e.target.checked }))}
-                    className="rounded border-stone-300 text-amber-700 focus:ring-amber-700 w-4 h-4"
-                  />
-                  <label htmlFor="includeDeliveryCheck" className="text-xs font-semibold text-stone-800 ml-2">
-                    Include White Glove Delivery & Setup (+$180)
-                  </label>
-                </div>
-              </div>
- 
-              <div className="pt-2 border-t border-stone-200">
-                <span className="text-xs font-bold text-stone-700 block mb-2">Itemized Breakdown Preview:</span>
-                <ul className="text-xs text-stone-600 space-y-1">
-                  {pendingDraft.items.map((it, i) => (
-                    <li key={i} className="flex justify-between font-mono">
-                      <span>{it.name} (Qty {it.quantity})</span>
-                      <span>${(it.quantity * it.unitPrice).toLocaleString()}</span>
-                    </li>
-                  ))}
-                </ul>
-                <div className="flex justify-between font-bold text-xs text-stone-900 pt-2 mt-2 border-t border-stone-200">
-                  <span>Total Calculated:</span>
-                  <span className="font-mono text-amber-900 text-sm">
-                    ${pendingDraft.items.reduce((s, i) => s + (i.quantity * i.unitPrice), 0).toLocaleString()}
-                  </span>
-                </div>
-              </div>
-            </div>
- 
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                onClick={() => setPendingDraft(null)}
-                className="px-4 py-2.5 bg-white border border-stone-300 rounded-xl text-xs font-semibold text-stone-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmAndCreateQuote}
-                disabled={isSubmittingAction || !isSupportedDraft(pendingDraft)}
-                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-md disabled:opacity-50"
-              >
-                {isSubmittingAction ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                <span>Confirm & Create Quote</span>
-              </button>
-            </div>
+      </Dialog>}
+
+      {pendingDraft && <Dialog wide title="Review estimate" description={`${pendingDraft.customerName} · Check every detail before creating the quote.`}
+        onClose={() => setPendingDraft(null)} busy={isSubmittingAction}
+        footer={<><button type="button" onClick={() => setPendingDraft(null)} className="cq-secondary" disabled={isSubmittingAction}>Cancel</button><button type="button" onClick={handleConfirmAndCreateQuote} className="cq-primary" disabled={isSubmittingAction || !isSupportedDraft(pendingDraft)}>{isSubmittingAction ? <RefreshCw size={15} className="animate-spin" /> : <Check size={16} />}Create quote</button></>}>
+        <div className="space-y-5">
+          <div className="cq-message">Prepared with {pendingDraft.source}. Prices are calculated from the catalog. Review required.</div>
+          {pendingDraft.isUncertain && <p role="alert" className="bg-amber-50 border border-amber-200 text-indigo-900 rounded-lg p-3 text-xs flex gap-2"><AlertCircle size={16} className="shrink-0" />{pendingDraft.uncertainWarning}</p>}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <label className="cq-field">Desk size<select data-autofocus value={pendingDraft.dimensions} onChange={event => setPendingDraft(updateDraftWithCalculation({...pendingDraft, dimensions:event.target.value}))}><option value="">Choose a size</option><option>48-inch Compact Desk</option><option>60-inch Standard Desk</option></select></label>
+            <label className="cq-field">Wood material<select value={pendingDraft.material} onChange={event => setPendingDraft(updateDraftWithCalculation({...pendingDraft, material:event.target.value}))}><option value="">Choose a material</option><option>White Oak Hardwood (Solid)</option><option>Black Walnut Upgrade</option></select></label>
+            <label className="cq-field">Drawer count<input type="number" min={0} max={6} step={1} aria-invalid={!Number.isInteger(pendingDraft.drawers) || pendingDraft.drawers < 0 || pendingDraft.drawers > 6} value={Number.isNaN(pendingDraft.drawers) ? '' : pendingDraft.drawers} onChange={event => setPendingDraft(updateDraftWithCalculation({...pendingDraft, drawers:parseDrawerInput(event.target.value)}))} /><span className="cq-field-hint">Choose a whole number from 0 to 6.</span></label>
+            <label className="flex items-start gap-3 sm:pt-7 text-sm text-slate-600"><input type="checkbox" className="mt-1 h-4 w-4" checked={pendingDraft.includeDelivery} onChange={event => setPendingDraft(updateDraftWithCalculation({...pendingDraft, includeDelivery:event.target.checked}))} /><span>White glove delivery<span className="block text-xs text-slate-400 mt-1">Use the catalog delivery rate.</span></span></label>
           </div>
+          <div className="cq-draft-summary"><p className="cq-eyebrow">Estimate breakdown</p>
+            {pendingDraft.items.map(item => <div className="cq-draft-line" key={item.id}><span>{item.name}{item.quantity > 1 ? ` × ${item.quantity}` : ''}</span><span>{formatMoney(item.quantity * item.unitPrice)}</span></div>)}
+            <div className="cq-draft-total"><span>Estimated total <small className="block text-slate-400 font-normal mt-1">USD · Customer approval required</small></span><strong>{pendingDraft.isUncertain ? '—' : formatMoney(pendingDraft.totalAmount)}</strong></div>
+          </div>
+          <details className="text-xs text-slate-500"><summary className="cursor-pointer font-semibold">Original customer request</summary><p className="mt-2 leading-relaxed">{pendingDraft.prompt}</p></details>
         </div>
-      )}
- 
+      </Dialog>}
     </div>
   );
 };
