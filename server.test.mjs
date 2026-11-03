@@ -38,6 +38,7 @@ async function runAuditTests() {
     const details = u.pathname.match(/^\/v2\/checkout\/orders\/(TEST-ORDER-\d+)$/);
     if (details && (!options.method || options.method === 'GET')) {
       const receipt = providerReceipts.get(details[1]);
+      if (receipt && scenario === 'minimal-reconcile-unavailable') return Response.json({ error: 'Temporary receipt lookup failure' }, { status: 503 });
       return Response.json({ id: details[1], status: receipt ? 'COMPLETED' : 'APPROVED', purchase_units: [receipt || orders.get(details[1])] });
     }
  
@@ -56,6 +57,10 @@ async function runAuditTests() {
         payments: { captures: [{ id: 'TEST-CAPTURE-' + captureCalls, status: scenario === 'pending-capture' ? 'PENDING' : 'COMPLETED', amount }] }
       };
       providerReceipts.set(match[1], receipt);
+      if (scenario === 'minimal-capture' || scenario === 'minimal-reconcile-unavailable' ||
+          (scenario === 'representation-required' && options.headers.Prefer !== 'return=representation')) {
+        return Response.json({ id: match[1], status: 'COMPLETED', links: [] });
+      }
       return Response.json({ id: match[1], status: 'COMPLETED', purchase_units: [receipt] });
     }
  
@@ -107,6 +112,33 @@ async function runAuditTests() {
     const priorCaptures = captureCalls;
     const duplicate = await capture(goodId, goodOrder.data.orderID);
     findings.push({ check: 'duplicate completed capture returns receipt without provider call', pass: duplicate.status === 200 && captureCalls === priorCaptures, actualStatus: duplicate.status });
+
+    for (const responseMode of ['representation-required', 'minimal-capture']) {
+      scenario = 'normal';
+      const receiptId = await approved();
+      const receiptOrder = await makeOrder(receiptId);
+      scenario = responseMode;
+      const callsBefore = captureCalls;
+      const received = await capture(receiptId, receiptOrder.data.orderID);
+      const canonical = await request('/api/quotes', undefined, 'GET');
+      findings.push({ check: responseMode + ' produces a fully verified receipt with one capture',
+        pass: received.status === 200 && received.data.status === 'COMPLETED' &&
+          captureCalls === callsBefore + 1 && canonical.data.find(q => q.id === receiptId)?.paymentStatus === 'paid',
+        actualStatus: received.status });
+    }
+    scenario = 'normal';
+    const recoveryId = await approved();
+    const recoveryOrder = await makeOrder(recoveryId);
+    const recoveryCalls = captureCalls;
+    scenario = 'minimal-reconcile-unavailable';
+    const unavailable = await capture(recoveryId, recoveryOrder.data.orderID);
+    const unresolved = await request('/api/quotes', undefined, 'GET');
+    scenario = 'normal';
+    const recovered = await capture(recoveryId, recoveryOrder.data.orderID);
+    findings.push({ check: 'a lost minimal receipt recovers the same order without a second capture',
+      pass: unavailable.status === 502 && unresolved.data.find(q => q.id === recoveryId)?.paymentStatus === 'unpaid' &&
+        recovered.status === 200 && recovered.data.status === 'COMPLETED' && captureCalls === recoveryCalls + 1,
+      actualStatus: recovered.status });
  
     let id = await quote();
     let r = await transition(id, 'approve');
