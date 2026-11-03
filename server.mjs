@@ -890,7 +890,8 @@ export function handleApiRequest(req, res, next) {
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
                 'Content-Type': 'application/json',
-                'PayPal-Request-Id': captureRequestId
+                'PayPal-Request-Id': captureRequestId,
+                'Prefer': 'return=representation'
               },
               signal: captureController.signal
             });
@@ -911,7 +912,32 @@ export function handleApiRequest(req, res, next) {
             return;
           }
  
-          const captureData = await ppRes.json();
+          let captureData = await ppRes.json();
+
+          // PayPal may return a minimal capture resource. Resolve the same order
+          // before applying the existing strict merchant/amount/version checks.
+          // Never repeat capture merely to obtain missing receipt fields.
+          if (captureData?.id === orderID && captureData?.status === 'COMPLETED' &&
+              !captureData?.purchase_units?.[0]?.payee?.merchant_id) {
+            const receiptController = new AbortController();
+            const receiptTimeout = setTimeout(() => receiptController.abort(), 10000);
+            try {
+              const receiptRes = await fetch(`https://api-m.sandbox.paypal.com/v2/checkout/orders/${orderID}`, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                signal: receiptController.signal
+              });
+              if (!receiptRes.ok) throw new Error('Full receipt unavailable');
+              captureData = await receiptRes.json();
+            } catch {
+              paymentAttempt.captureState = 'UNCERTAIN';
+              persistAll();
+              sendJson(502, { error: 'Capture receipt reconciliation unavailable. Check payment status; do not pay again.' });
+              return;
+            } finally {
+              clearTimeout(receiptTimeout);
+            }
+          }
  
           const postChildren = captureData?.purchase_units?.[0]?.payments?.captures;
           if (postChildren?.length && postChildren[0].status === 'PENDING') {
