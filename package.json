@@ -9,7 +9,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "start": "node server.mjs",
-    "test": "node --test ai-contract.test.mjs runtime-access.test.mjs launcher.test.mjs draft.test.mjs demo-runtime.test.mjs bridge-http.test.mjs && node checkout.test.mjs",
+    "test": "node --test ai-contract.test.mjs runtime-access.test.mjs launcher.test.mjs draft.test.mjs demo-runtime.test.mjs bridge-http.test.mjs workflow.test.mjs && node checkout.test.mjs",
     "test:server": "node server.test.mjs"
   },
   "dependencies": {
