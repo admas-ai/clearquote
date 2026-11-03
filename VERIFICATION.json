@@ -1,38 +1,51 @@
 {
   "project": "ClearQuote",
-  "verified_at": "2026-11-01T23:52:36Z",
-  "application_auth": "Supabase app-user email session verified through app UI",
-  "provider": "openai",
-  "profile": "fast",
-  "provider_tokens": 240,
-  "credits_used": 1,
-  "project_cap": 100,
-  "credits_remaining": 99,
-  "input": "I'd like a forty-eight-inch solid white oak desk, a pair of drawers, and delivery.",
-  "extracted": {
-    "dimensions": "48-inch Compact Desk",
-    "material": "White Oak Hardwood (Solid)",
-    "drawers": 2,
-    "includeDelivery": true
-  },
-  "catalog_total_usd": 1130,
-  "evidence": "Actual ClearQuote preview draft plus Admas Cloud recent application-AI audit",
-  "paypal_live_verification": false,
-  "submission_completed": false,
   "release": "0.1.0",
+  "updated_at": "2026-11-03T05:44:22.235675+00:00",
+  "initial_ai_receipt": {
+    "verified_at": "2026-11-01T23:52:36Z",
+    "application_auth": "Supabase app-user email session verified through app UI",
+    "provider": "openai",
+    "profile": "fast",
+    "provider_tokens": 240,
+    "credits_used": 1,
+    "project_cap": 100,
+    "credits_remaining": 99,
+    "input": "I'd like a forty-eight-inch solid white oak desk, a pair of drawers, and delivery.",
+    "extracted": {
+      "dimensions": "48-inch Compact Desk",
+      "material": "White Oak Hardwood (Solid)",
+      "drawers": 2,
+      "includeDelivery": true
+    },
+    "catalog_total_usd": 1130,
+    "evidence": "Actual ClearQuote preview draft plus Admas Cloud recent application-AI audit"
+  },
   "automated_checks": {
-    "pricing_ai_auth_access_launcher": 25,
-    "checkout_lifecycle": 18,
-    "backend_fake_provider": 16,
-    "production_build": "passed",
-    "lint": "completed_with_existing_warnings"
+    "focused": 28,
+    "checkout_fake_sdk": 18,
+    "backend_fake_provider": 19,
+    "total": 65,
+    "failed": 0
   },
-  "owner_runtime": {
-    "https_backend": "observed_connected",
-    "paypal_sdk": "rendered",
-    "approval_page": "opened_blank",
-    "buyer_approval": false,
-    "capture_verified": false
+  "latest_live_evidence": {
+    "ai_extraction_verified": true,
+    "initial_quote_total_usd": 1130,
+    "sandbox_buyer_approval_verified": true,
+    "canonical_paid_receipt_verified": true,
+    "quote": "CQ-2026-088",
+    "version": 2,
+    "amount_usd": 950,
+    "order_reference": "9T281366V7812502L",
+    "payment_recovered_through": "Existing explicit recheck of the same full PayPal order; no second capture",
+    "latest_runner_automatic_capture_flow_verified_live": false,
+    "latest_runner_owner_restart_required": true,
+    "preview_owner_send_fix_published": true,
+    "preview_publication_blocker": null,
+    "video_published": false,
+    "devpost_status": "Registered; draft 1280040, 3/5 steps; not submitted",
+    "supabase_connection": "Renewed to the same existing qnbcjliszcgpncgaipcf backend; no database data deleted and no new plan.",
+    "live_owner_send_verified": true
   },
-  "new_tunnel_ai_origin": "Interface remains on the approved Admas origin; private run-token API transport added and unit-tested; live combined verification pending"
+  "submission_completed": false
 }
