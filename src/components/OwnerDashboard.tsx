@@ -324,7 +324,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                 <div>
                   <span className="text-xs font-bold text-stone-700 block mb-0.5">Workflow Actions:</span>
                   <p className="text-[11px] text-stone-500">
-                    {activeVersion.status === 'pending_review' && 'Review itemized estimate, edit if needed, then send to customer for approval.'}
+                    {(activeVersion.status === 'draft' || activeVersion.status === 'pending_review') && 'Review itemized estimate, edit if needed, then send to customer for approval.'}
                     {activeVersion.status === 'sent_to_customer' && 'Waiting for customer review and approval.'}
                     {activeVersion.status === 'approved' && 'Customer approved this version. Ready for secure PayPal sandbox checkout.'}
                     {activeVersion.status === 'superseded' && 'This version has been superseded by a newer revision.'}
@@ -332,7 +332,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                 </div>
  
                 <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                  {activeVersion.status === 'pending_review' && (
+                  {(activeVersion.status === 'draft' || activeVersion.status === 'pending_review') && (
                     <button
                       onClick={handleSendToCustomer}
                       disabled={isSubmittingAction}
